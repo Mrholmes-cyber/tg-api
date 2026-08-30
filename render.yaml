@@ -2,7 +2,7 @@ services:
   - type: web
     name: telegram-data-api
     runtime: python
-    plan: starter          # free tier works, but 512MB RAM is tight for big scans
+    plan: free          # free tier works, but 512MB RAM is tight for big scans
     region: oregon
     buildCommand: |
       pip install -r requirements.txt
