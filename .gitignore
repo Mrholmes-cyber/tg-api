@@ -1,0 +1,9 @@
+.env
+__pycache__/
+*.pyc
+build/
+.pytest_cache/
+.venv/
+venv/
+*.parquet
+!tests/**/*.parquet

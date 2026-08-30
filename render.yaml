@@ -1,0 +1,50 @@
+services:
+  - type: web
+    name: telegram-data-api
+    runtime: python
+    plan: starter          # free tier works, but 512MB RAM is tight for big scans
+    region: oregon
+    buildCommand: |
+      pip install -r requirements.txt
+      mkdir -p .duckdb_ext
+      python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='.duckdb_ext'\"); c.execute('INSTALL httpfs')"
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --workers 1 --timeout-keep-alive 65
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
+      - key: DATASET_REPO
+        value: Kzr0xx/telegram
+      - key: DATASET_REVISION
+        value: main
+      - key: DATASET_GLOB
+        value: "**/*.parquet"
+      - key: DATASET_CONFIG
+        value: default
+      - key: DATASET_SPLIT
+        value: train
+      - key: DISCOVER_PARQUET
+        value: "true"
+      - key: PARQUET_URLS
+        sync: false
+      - key: PHONE_SOURCE
+        sync: false
+      - key: USERNAME_SOURCE
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: API_KEYS
+        generateValue: true
+      - key: REQUIRE_AUTH
+        value: "true"
+      - key: ALLOW_RAW_SQL
+        value: "false"
+      - key: DUCKDB_MEMORY_LIMIT
+        value: 350MB
+      - key: DUCKDB_THREADS
+        value: "2"
+      - key: CACHE_TTL_SECONDS
+        value: "900"
+      - key: DUCKDB_EXTENSION_DIRECTORY
+        value: .duckdb_ext   # baked at build time so cold starts skip the download
