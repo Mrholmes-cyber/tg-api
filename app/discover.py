@@ -15,7 +15,7 @@ HUB_API = "https://huggingface.co/api/datasets/{repo}/parquet/{config}/{split}"
 TREE_API = "https://huggingface.co/api/datasets/{repo}/tree/{revision}?recursive=true"
 VIEWER_SPLITS = "https://datasets-server.huggingface.co/splits?dataset={repo}"
 CACHE_PATH = os.environ.get("DISCOVER_CACHE", "/tmp/tg_parquet_urls.json")
-CACHE_TTL = 24 * 3600
+CACHE_TTL = 15 * 60
 
 
 def _get_json(url: str, token: str = "", timeout: int = 20):
@@ -56,11 +56,25 @@ def _tree_parquet_urls(repo: str, revision: str, token: str = "") -> List[str]:
         return []
 
     paths = [path for path in _flatten(payload) if path.lower().endswith(".parquet")]
-    return [
+    urls = [
         f"https://huggingface.co/datasets/{repo}/resolve/"
         f"{quote(revision, safe='')}/{quote(path, safe='/')}"
         for path in paths
     ]
+    return [_resolve_download_url(url, token) for url in urls]
+
+
+def _resolve_download_url(url: str, token: str = "") -> str:
+    """Follow Hugging Face's redirect so DuckDB reads the signed CDN URL."""
+    req = urllib.request.Request(url, headers={"User-Agent": "tg-api/1.0"})
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return resp.geturl()
+    except (urllib.error.URLError, TimeoutError) as exc:
+        log.warning("download URL resolution failed for %s: %s", url, exc)
+        return url
 
 
 def _read_cache(key: str) -> Optional[List[str]]:
