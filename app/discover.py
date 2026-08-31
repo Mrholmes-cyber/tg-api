@@ -12,6 +12,7 @@ from typing import List, Optional
 log = logging.getLogger("tgapi.discover")
 
 HUB_API = "https://huggingface.co/api/datasets/{repo}/parquet/{config}/{split}"
+DATASET_SERVER_API = "https://datasets-server.huggingface.co/parquet?dataset={repo}"
 TREE_API = "https://huggingface.co/api/datasets/{repo}/tree/{revision}?recursive=true"
 VIEWER_SPLITS = "https://datasets-server.huggingface.co/splits?dataset={repo}"
 CACHE_PATH = os.environ.get("DISCOVER_CACHE", "/tmp/tg_parquet_urls.json")
@@ -62,6 +63,25 @@ def _tree_parquet_urls(repo: str, revision: str, token: str = "") -> List[str]:
         for path in paths
     ]
     return [_resolve_download_url(url, token) for url in urls]
+
+
+def _dataset_server_urls(repo: str, config: str, split: str, token: str = "") -> List[str]:
+    """Get the dataset-server parquet files, which are range-readable on Render."""
+    try:
+        payload = _get_json(DATASET_SERVER_API.format(repo=quote(repo, safe="")), token)
+    except (urllib.error.URLError, ValueError, TimeoutError) as exc:
+        log.warning("dataset-server discovery failed for %s/%s: %s", repo, split, exc)
+        return []
+    if not isinstance(payload, dict):
+        return []
+    return [
+        item["url"]
+        for item in payload.get("parquet_files", [])
+        if isinstance(item, dict)
+        and item.get("config") == config
+        and item.get("split") == split
+        and item.get("url")
+    ]
 
 
 def _resolve_download_url(url: str, token: str = "") -> str:
@@ -131,9 +151,13 @@ def parquet_urls(
     # Some datasets return synthetic parquet API URLs for ordinary repository
     # files. Resolve the actual paths so DuckDB does not receive 404s.
     if urls and all("/api/datasets/" in item and "/parquet/" in item for item in urls):
-        tree_urls = _tree_parquet_urls(repo, revision, token)
-        if tree_urls:
-            urls = tree_urls
+        server_urls = _dataset_server_urls(repo, config, split, token)
+        if server_urls:
+            urls = server_urls
+        else:
+            tree_urls = _tree_parquet_urls(repo, revision, token)
+            if tree_urls:
+                urls = tree_urls
 
     log.info("discovered %d parquet files for %s", len(urls), key)
     _write_cache(key, urls)
