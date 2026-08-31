@@ -34,6 +34,18 @@ services:
         sync: false
       - key: HF_TOKEN
         sync: false
+      - key: S3_ENDPOINT
+        value: https://s3.hf.co/sunsau91
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_REGION
+        value: us-east-1
+      - key: S3_URL_STYLE
+        value: path
+      - key: PARQUET_GLOB
+        value: s3://sudipta-telegram-bucket/*.parquet
       - key: API_KEYS
         generateValue: true
       - key: REQUIRE_AUTH
