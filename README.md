@@ -19,11 +19,6 @@ repository tree. If discovery is unavailable, it falls back to globbing
 `hf://datasets/Kzr0xx/telegram@main/**/*.parquet`. Both paths are overridable —
 see `PARQUET_URLS` and the `S3_*` block in `.env.example`.
 
-For a Hugging Face Storage Bucket, use the S3-compatible gateway:
-`S3_ENDPOINT=https://s3.hf.co/sunsau91`, `PARQUET_GLOB=s3://sudipta-telegram-bucket/*.parquet`,
-and set `S3_ACCESS_KEY_ID` plus `S3_SECRET_ACCESS_KEY` from Hugging Face bucket
-access keys. These are different from `HF_TOKEN`.
-
 `GET /v1/source` shows exactly what got wired up, including the shard list.
 
 ## Endpoints
