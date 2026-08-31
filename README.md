@@ -13,9 +13,11 @@ At boot the service asks the hub for the exact shard list:
     GET https://huggingface.co/api/datasets/Kzr0xx/telegram/parquet/default/train
 
 That returns the parquet URLs, which get cached to disk for 24 hours and wired
-into a DuckDB view called `tg`. If the hub API is unreachable, it falls back to
-globbing `hf://datasets/Kzr0xx/telegram@main/**/*.parquet`. Both paths are
-overridable — see `PARQUET_URLS` and the `S3_*` block in `.env.example`.
+into a DuckDB view called `tg`. If the hub returns synthetic parquet URLs for
+repository files, the service resolves the actual `.parquet` paths from the
+repository tree. If discovery is unavailable, it falls back to globbing
+`hf://datasets/Kzr0xx/telegram@main/**/*.parquet`. Both paths are overridable —
+see `PARQUET_URLS` and the `S3_*` block in `.env.example`.
 
 `GET /v1/source` shows exactly what got wired up, including the shard list.
 

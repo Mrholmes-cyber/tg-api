@@ -80,7 +80,11 @@ def source(_: str = Depends(require_api_key)):
     shards = []
     if s.source_mode == "hf-dataset" and s.discover_parquet:
         shards = discover.parquet_urls(
-            s.dataset_repo, s.dataset_config, s.dataset_split, s.hf_token
+            s.dataset_repo,
+            s.dataset_config,
+            s.dataset_split,
+            s.hf_token,
+            s.dataset_revision,
         )
     return {
         "mode": s.source_mode,

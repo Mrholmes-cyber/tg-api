@@ -6,11 +6,13 @@ import os
 import time
 import urllib.error
 import urllib.request
+from urllib.parse import quote
 from typing import List, Optional
 
 log = logging.getLogger("tgapi.discover")
 
 HUB_API = "https://huggingface.co/api/datasets/{repo}/parquet/{config}/{split}"
+TREE_API = "https://huggingface.co/api/datasets/{repo}/tree/{revision}?recursive=true"
 VIEWER_SPLITS = "https://datasets-server.huggingface.co/splits?dataset={repo}"
 CACHE_PATH = os.environ.get("DISCOVER_CACHE", "/tmp/tg_parquet_urls.json")
 CACHE_TTL = 24 * 3600
@@ -32,7 +34,7 @@ def _flatten(payload) -> List[str]:
             if isinstance(item, str):
                 out.append(item)
             elif isinstance(item, dict):
-                url = item.get("url") or item.get("filename")
+                url = item.get("url") or item.get("filename") or item.get("path")
                 if url:
                     out.append(url)
         return out
@@ -41,6 +43,24 @@ def _flatten(payload) -> List[str]:
             if key in payload:
                 return _flatten(payload[key])
     return []
+
+
+def _tree_parquet_urls(repo: str, revision: str, token: str = "") -> List[str]:
+    """Build resolve URLs from repository files when the parquet API is stale."""
+    try:
+        payload = _get_json(
+            TREE_API.format(repo=repo, revision=quote(revision, safe="")), token
+        )
+    except (urllib.error.URLError, ValueError, TimeoutError) as exc:
+        log.warning("repository tree discovery failed for %s@%s: %s", repo, revision, exc)
+        return []
+
+    paths = [path for path in _flatten(payload) if path.lower().endswith(".parquet")]
+    return [
+        f"https://huggingface.co/datasets/{repo}/resolve/"
+        f"{quote(revision, safe='')}/{quote(path, safe='/')}"
+        for path in paths
+    ]
 
 
 def _read_cache(key: str) -> Optional[List[str]]:
@@ -69,10 +89,15 @@ def splits(repo: str, token: str = "") -> List[dict]:
 
 
 def parquet_urls(
-    repo: str, config: str = "default", split: str = "train", token: str = ""
+    repo: str,
+    config: str = "default",
+    split: str = "train",
+    token: str = "",
+    revision: str = "main",
 ) -> List[str]:
     """Resolve the dataset's parquet shard URLs, cached on disk for a day."""
-    key = f"{repo}/{config}/{split}"
+    # Bump the key so deployments do not reuse pre-fallback synthetic URLs.
+    key = f"v2:{repo}/{config}/{split}/{revision}"
     cached = _read_cache(key)
     if cached:
         log.info("discovery cache hit: %d files", len(cached))
@@ -88,6 +113,13 @@ def parquet_urls(
     if not urls:
         log.warning("parquet discovery returned nothing for %s", key)
         return []
+
+    # Some datasets return synthetic parquet API URLs for ordinary repository
+    # files. Resolve the actual paths so DuckDB does not receive 404s.
+    if urls and all("/api/datasets/" in item and "/parquet/" in item for item in urls):
+        tree_urls = _tree_parquet_urls(repo, revision, token)
+        if tree_urls:
+            urls = tree_urls
 
     log.info("discovered %d parquet files for %s", len(urls), key)
     _write_cache(key, urls)
