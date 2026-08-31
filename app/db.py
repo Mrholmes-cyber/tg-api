@@ -70,6 +70,12 @@ def _source_expr(s) -> str:
         RESOLVED_FILES, RESOLVED_SOURCE = 0, s.parquet_glob
         return _scan_of(s.parquet_glob)
     if s.dataset_repo:
+        # Let DuckDB's Hugging Face secret authenticate the actual parquet
+        # requests. HTTP discovery URLs redirect to Xet, where Python headers
+        # cannot be forwarded by DuckDB's internal HTTP client.
+        if s.hf_token:
+            RESOLVED_FILES, RESOLVED_SOURCE = 0, s.hf_uri
+            return _scan_of(s.hf_uri)
         if s.discover_parquet:
             found = discover.parquet_urls(
                 s.dataset_repo,
