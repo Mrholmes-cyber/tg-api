@@ -22,7 +22,7 @@ CACHE_TTL = 15 * 60
 def _get_json(url: str, token: str = "", timeout: int = 20):
     req = urllib.request.Request(url, headers={"User-Agent": "tg-api/1.0"})
     if token:
-        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Authorization", "Bearer " + token)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -88,7 +88,7 @@ def _resolve_download_url(url: str, token: str = "") -> str:
     """Follow Hugging Face's redirect so DuckDB reads the signed CDN URL."""
     req = urllib.request.Request(url, headers={"User-Agent": "tg-api/1.0"})
     if token:
-        req.add_header("Authorization", f"Bearer {token}")
+        req.add_header("Authorization", "Bearer " + token)
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
             return resp.geturl()
@@ -129,8 +129,7 @@ def parquet_urls(
     token: str = "",
     revision: str = "main",
 ) -> List[str]:
-    """Resolve the dataset's parquet shard URLs, cached on disk for a day."""
-    # Bump the key so deployments do not reuse pre-fallback synthetic URLs.
+    """Resolve the dataset's parquet shard URLs, cached on disk for 15 minutes."""
     key = f"v2:{repo}/{config}/{split}/{revision}"
     cached = _read_cache(key)
     if cached:
@@ -148,8 +147,6 @@ def parquet_urls(
         log.warning("parquet discovery returned nothing for %s", key)
         return []
 
-    # Some datasets return synthetic parquet API URLs for ordinary repository
-    # files. Resolve the actual paths so DuckDB does not receive 404s.
     if urls and all("/api/datasets/" in item and "/parquet/" in item for item in urls):
         server_urls = _dataset_server_urls(repo, config, split, token)
         if server_urls:
