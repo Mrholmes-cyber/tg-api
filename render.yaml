@@ -2,7 +2,7 @@ services:
   - type: web
     name: telegram-data-api
     runtime: python
-    plan: free          # free tier works, but 512MB RAM is tight for big scans
+    plan: starter          # free tier works, but 512MB RAM is tight for big scans
     region: oregon
     buildCommand: |
       pip install -r requirements.txt
@@ -15,7 +15,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: DATASET_REPO
-        value: sunsau91/telegram
+        value: sunsau91/fullteegee
       - key: DATASET_REVISION
         value: main
       - key: DATASET_GLOB
