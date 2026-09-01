@@ -12,17 +12,16 @@ from typing import List, Optional
 log = logging.getLogger("tgapi.discover")
 
 HUB_API = "https://huggingface.co/api/datasets/{repo}/parquet/{config}/{split}"
-DATASET_SERVER_API = "https://datasets-server.huggingface.co/parquet?dataset={repo}"
 TREE_API = "https://huggingface.co/api/datasets/{repo}/tree/{revision}?recursive=true"
 VIEWER_SPLITS = "https://datasets-server.huggingface.co/splits?dataset={repo}"
 CACHE_PATH = os.environ.get("DISCOVER_CACHE", "/tmp/tg_parquet_urls.json")
-CACHE_TTL = 15 * 60
+CACHE_TTL = 24 * 3600
 
 
 def _get_json(url: str, token: str = "", timeout: int = 20):
     req = urllib.request.Request(url, headers={"User-Agent": "tg-api/1.0"})
     if token:
-        req.add_header("Authorization", "Bearer " + token)
+        req.add_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
@@ -57,44 +56,11 @@ def _tree_parquet_urls(repo: str, revision: str, token: str = "") -> List[str]:
         return []
 
     paths = [path for path in _flatten(payload) if path.lower().endswith(".parquet")]
-    urls = [
+    return [
         f"https://huggingface.co/datasets/{repo}/resolve/"
         f"{quote(revision, safe='')}/{quote(path, safe='/')}"
         for path in paths
     ]
-    return [_resolve_download_url(url, token) for url in urls]
-
-
-def _dataset_server_urls(repo: str, config: str, split: str, token: str = "") -> List[str]:
-    """Get the dataset-server parquet files, which are range-readable on Render."""
-    try:
-        payload = _get_json(DATASET_SERVER_API.format(repo=quote(repo, safe="")), token)
-    except (urllib.error.URLError, ValueError, TimeoutError) as exc:
-        log.warning("dataset-server discovery failed for %s/%s: %s", repo, split, exc)
-        return []
-    if not isinstance(payload, dict):
-        return []
-    return [
-        item["url"]
-        for item in payload.get("parquet_files", [])
-        if isinstance(item, dict)
-        and item.get("config") == config
-        and item.get("split") == split
-        and item.get("url")
-    ]
-
-
-def _resolve_download_url(url: str, token: str = "") -> str:
-    """Follow Hugging Face's redirect so DuckDB reads the signed CDN URL."""
-    req = urllib.request.Request(url, headers={"User-Agent": "tg-api/1.0"})
-    if token:
-        req.add_header("Authorization", "Bearer " + token)
-    try:
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            return resp.geturl()
-    except (urllib.error.URLError, TimeoutError) as exc:
-        log.warning("download URL resolution failed for %s: %s", url, exc)
-        return url
 
 
 def _read_cache(key: str) -> Optional[List[str]]:
@@ -129,7 +95,8 @@ def parquet_urls(
     token: str = "",
     revision: str = "main",
 ) -> List[str]:
-    """Resolve the dataset's parquet shard URLs, cached on disk for 15 minutes."""
+    """Resolve the dataset's parquet shard URLs, cached on disk for a day."""
+    # Bump the key so deployments do not reuse pre-fallback synthetic URLs.
     key = f"v2:{repo}/{config}/{split}/{revision}"
     cached = _read_cache(key)
     if cached:
@@ -147,14 +114,10 @@ def parquet_urls(
         log.warning("parquet discovery returned nothing for %s", key)
         return []
 
-    if urls and all("/api/datasets/" in item and "/parquet/" in item for item in urls):
-        server_urls = _dataset_server_urls(repo, config, split, token)
-        if server_urls:
-            urls = server_urls
-        else:
-            tree_urls = _tree_parquet_urls(repo, revision, token)
-            if tree_urls:
-                urls = tree_urls
+    # NOTE: Previously this code detected "synthetic" /api/datasets/ URLs and
+    # replaced them with tree-based /resolve/ URLs. That breaks when the
+    # original repo files are gated (403). The API redirect URLs work fine —
+    # DuckDB follows the 302 to the CDN automatically.
 
     log.info("discovered %d parquet files for %s", len(urls), key)
     _write_cache(key, urls)
