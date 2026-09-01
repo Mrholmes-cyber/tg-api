@@ -11,7 +11,7 @@ class Settings(BaseSettings):
 
     # data source
     # Default: the Hugging Face dataset repo, read directly over hf://.
-    dataset_repo: str = "Kzr0xx/telegram"
+    dataset_repo: str = "sunsau91/fullteegee"
     dataset_revision: str = "main"
     dataset_glob: str = "**/*.parquet"
     dataset_config: str = "default"
