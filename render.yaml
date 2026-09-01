@@ -19,13 +19,13 @@ services:
       - key: DATASET_REVISION
         value: main
       - key: DATASET_GLOB
-        value: "**/*.parquet"
+        value: "TELEGRAM_MASTER_DB.parquet"
       - key: DATASET_CONFIG
         value: default
       - key: DATASET_SPLIT
         value: train
       - key: DISCOVER_PARQUET
-        value: "true"
+        value: "false"
       - key: PARQUET_URLS
         sync: false
       - key: PHONE_SOURCE
