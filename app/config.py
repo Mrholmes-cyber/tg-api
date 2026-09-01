@@ -13,12 +13,12 @@ class Settings(BaseSettings):
     # Default: the Hugging Face dataset repo, read directly over hf://.
     dataset_repo: str = "sunsau91/fullteegee"
     dataset_revision: str = "main"
-    dataset_glob: str = "**/*.parquet"
+    dataset_glob: str = "TELEGRAM_MASTER_DB.parquet"
     dataset_config: str = "default"
     dataset_split: str = "train"
     # Ask the hub which parquet shards exist instead of globbing blindly:
     # GET /api/datasets/{repo}/parquet/{config}/{split}
-    discover_parquet: bool = True
+    discover_parquet: bool = False
 
     # Overrides. PARQUET_URLS wins over S3, S3 wins over the dataset repo.
     parquet_urls: str = ""
