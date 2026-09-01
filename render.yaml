@@ -15,7 +15,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.11.9"
       - key: DATASET_REPO
-        value: sunsau91/fullteegee
+        value: NhiBatauga/Telegram-Database
       - key: DATASET_REVISION
         value: main
       - key: DATASET_GLOB
