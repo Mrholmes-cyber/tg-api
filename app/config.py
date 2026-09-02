@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     # GET /api/datasets/{repo}/parquet/{config}/{split}
     discover_parquet: bool = True
 
+    # Merge shards by column name. Turn off only if every file has an
+    # identical schema and you want the (tiny) planning speedup.
+    parquet_union_by_name: bool = True
+
     # Overrides. PARQUET_URLS wins over S3, S3 wins over the dataset repo.
     parquet_urls: str = ""
     parquet_glob: str = ""
@@ -49,6 +53,12 @@ class Settings(BaseSettings):
     cache_ttl_seconds: int = 900
     cache_maxsize: int = 1024
     query_timeout_seconds: int = 110
+    # DuckDB httpfs. Timeout is per HTTP request, in seconds.
+    http_timeout_seconds: int = 120
+    http_retries: int = 5
+    # Boot the engine in a background thread so the port binds instantly and
+    # Render's health check passes while parquet metadata is still loading.
+    warmup_in_background: bool = True
 
     @property
     def urls(self) -> List[str]:

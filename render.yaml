@@ -46,5 +46,11 @@ services:
         value: "2"
       - key: CACHE_TTL_SECONDS
         value: "900"
+      - key: HTTP_TIMEOUT_SECONDS
+        value: "120"
+      - key: HTTP_RETRIES
+        value: "5"
+      - key: WARMUP_IN_BACKGROUND
+        value: "true"       # port binds immediately; /health reports engine state
       - key: DUCKDB_EXTENSION_DIRECTORY
         value: .duckdb_ext   # baked at build time so cold starts skip the download

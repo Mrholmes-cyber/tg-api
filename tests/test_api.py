@@ -43,6 +43,7 @@ def fixture_env():
         API_KEYS="test-key",
         ALLOW_RAW_SQL="true",
         HF_TOKEN="",
+        WARMUP_IN_BACKGROUND="false",
     )
     yield
 
@@ -65,7 +66,11 @@ HEAD = {"X-API-Key": "test-key"}
 def test_health(client):
     body = client.get("/health").json()
     assert body["status"] == "ok"
+    assert body["engine"] == "ready"
+    assert body["error"] is None
     assert body["source_mode"] == "https"
+    assert body["files"] == 1
+    assert body["id_column"] == "user_id"
 
 
 def test_auth_required(client):
@@ -150,13 +155,38 @@ def test_discovery_uses_cache(monkeypatch, tmp_path):
 
     def fake_get(url, token="", timeout=20):
         calls["n"] += 1
-        return ["https://example.invalid/x.parquet"]
+        if "/tree/" in url:  # repo listing, preferred source
+            return [
+                {"type": "file", "path": "data_10.parquet"},
+                {"type": "file", "path": "data_2.parquet"},
+                {"type": "file", "path": "README.md"},
+            ]
+        raise AssertionError("hub parquet API should not be consulted")
 
     monkeypatch.setattr(discover, "_get_json", fake_get)
     first = discover.parquet_urls("a/b", "default", "train")
     second = discover.parquet_urls("a/b", "default", "train")
-    assert first == second == ["https://example.invalid/x.parquet"]
+    assert first == second == [
+        "https://huggingface.co/datasets/a/b/resolve/main/data_2.parquet",
+        "https://huggingface.co/datasets/a/b/resolve/main/data_10.parquet",
+    ]
     assert calls["n"] == 1  # second call served from disk cache
+
+
+def test_discovery_falls_back_to_hub_api(monkeypatch, tmp_path):
+    from app import discover
+
+    monkeypatch.setattr(discover, "CACHE_PATH", str(tmp_path / "c3.json"))
+
+    def fake_get(url, token="", timeout=20):
+        if "/tree/" in url:
+            raise urllib.error.URLError("no tree")
+        return ["https://huggingface.co/api/datasets/a/b/parquet/default/train/0.parquet"]
+
+    monkeypatch.setattr(discover, "_get_json", fake_get)
+    assert discover.parquet_urls("a/b") == [
+        "https://huggingface.co/api/datasets/a/b/parquet/default/train/0.parquet"
+    ]
 
 
 def test_discovery_failure_is_soft(monkeypatch, tmp_path):
@@ -169,3 +199,83 @@ def test_discovery_failure_is_soft(monkeypatch, tmp_path):
 
     monkeypatch.setattr(discover, "_get_json", boom)
     assert discover.parquet_urls("a/b") == []
+
+
+# ---------------------------------------------------------------------------
+# schema adaptation: the live dataset stores the id as VARCHAR `account_id`
+# ---------------------------------------------------------------------------
+ALT_FIXTURE = "/tmp/tg_fixture_account_id.parquet"
+
+
+def test_account_id_alias_maps_to_user_id():
+    con = duckdb.connect()
+    con.execute(
+        f"""
+        COPY (
+            SELECT CAST(i AS VARCHAR) AS account_id,
+                   'alt' || i         AS username,
+                   'A' || i           AS first_name,
+                   ''                 AS last_name,
+                   '9989090' || (1000 + i) AS phone,
+                   ''                 AS email,
+                   ''                 AS status,
+                   ''                 AS linked_id,
+                   ''                 AS linked_name,
+                   ''                 AS linked_handle
+            FROM range(1, 51) t(i)
+        ) TO '{ALT_FIXTURE}' (FORMAT PARQUET)
+        """
+    )
+    con.close()
+
+    from app import db, queries
+    from app.config import get_settings
+
+    old = os.environ.get("PARQUET_URLS")
+    os.environ["PARQUET_URLS"] = ALT_FIXTURE
+    get_settings.cache_clear()
+    db.close()
+    try:
+        db.connection()
+        assert db.STATE == "ready"
+        assert db.ID_COL == "account_id" and db.ID_IS_TEXT is True
+        cols = {c["column_name"] for c in db.query("DESCRIBE SELECT * FROM tg")}
+        assert set(db.COLUMNS) <= cols
+
+        body = queries.by_user_id(7)
+        assert body["count"] == 1
+        assert body["results"][0]["user_id"] == 7
+        assert body["results"][0]["username"] == "alt7"
+
+        body = queries.search(7, None, None, None, None, None, None, 10, 0)
+        assert body["count"] == 1
+    finally:
+        db.close()
+        db.cache_clear()
+        if old is None:
+            os.environ.pop("PARQUET_URLS", None)
+        else:
+            os.environ["PARQUET_URLS"] = old
+        get_settings.cache_clear()
+
+
+def test_failed_bootstrap_is_reported_not_raised():
+    from app import db
+    from app.config import get_settings
+
+    old = os.environ.get("PARQUET_URLS")
+    os.environ["PARQUET_URLS"] = "/tmp/definitely-missing.parquet"
+    get_settings.cache_clear()
+    db.close()
+    try:
+        with pytest.raises(Exception):
+            db.connection()
+        assert db.STATE == "failed"
+        assert "definitely-missing" in db.LAST_ERROR
+    finally:
+        db.close()
+        if old is None:
+            os.environ.pop("PARQUET_URLS", None)
+        else:
+            os.environ["PARQUET_URLS"] = old
+        get_settings.cache_clear()

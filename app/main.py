@@ -22,11 +22,18 @@ log = logging.getLogger("tgapi")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    try:
-        db.connection()  # warm the connection + parquet metadata on boot
-        log.info("warm-up ok")
-    except Exception as exc:  # keep the service up so /health can report why
-        log.error("warm-up failed: %s", exc)
+    s = get_settings()
+    if s.warmup_in_background:
+        # Bind the port right away; Render's health check only needs an HTTP
+        # 200 from /health, and reading ~100 parquet footers over the network
+        # can take a minute on a small instance.
+        db.start_warmup()
+    else:
+        try:
+            db.connection()
+            log.info("warm-up ok in %.1fs", db.WARMUP_SECONDS)
+        except Exception as exc:  # keep the service up so /health can report why
+            log.error("warm-up failed: %s", exc)
     yield
     db.close()
 
@@ -57,18 +64,42 @@ def root():
 
 @app.get("/health", response_model=Health, tags=["meta"])
 def health():
+    """Liveness + readiness in one. Always returns 200 so the platform keeps
+    the instance alive while the engine warms up; `engine` says what's going
+    on and `error` carries the exact failure if warm-up broke."""
     s = get_settings()
-    try:
-        db.scalar("SELECT 1")
-        engine = "up"
-    except Exception as exc:
-        engine = f"down: {exc}"
+    engine = db.STATE
+    error = db.LAST_ERROR
+    if engine == "ready":
+        try:
+            db.scalar("SELECT 1")
+        except Exception as exc:
+            engine, error = "failed", str(exc)
+    elif engine in ("cold", "failed") and not s.warmup_in_background:
+        # synchronous mode: probe (and retry) inline
+        try:
+            db.scalar("SELECT 1")
+            engine, error = "ready", ""
+        except Exception as exc:
+            engine, error = "failed", str(exc)
+    elif engine == "failed":
+        # a previous background warm-up failed; kick off another attempt so a
+        # transient hub hiccup doesn't leave the service degraded forever
+        db.start_warmup()
+
+    status = {"ready": "ok", "warming": "starting", "cold": "starting"}.get(
+        engine, "degraded"
+    )
     return Health(
-        status="ok" if engine == "up" else "degraded",
+        status=status,
+        engine=engine,
+        error=error or None,
+        warmup_seconds=round(db.WARMUP_SECONDS, 1),
         duckdb=duckdb.__version__,
         source_mode=s.source_mode,
         source=db.RESOLVED_SOURCE or s.hf_uri,
         files=db.RESOLVED_FILES,
+        id_column=db.ID_COL,
         cache=db.cache_stats(),
     )
 
@@ -97,6 +128,8 @@ def source(_: str = Depends(require_api_key)):
             "revision": s.dataset_revision,
         },
         "views": {"phone": db.VIEW_PHONE, "username": db.VIEW_USERNAME},
+        "id_column": {"name": db.ID_COL, "stored_as_text": db.ID_IS_TEXT},
+        "raw_schema": db.RAW_SCHEMA,
         "shards": shards,
     }
 
@@ -162,9 +195,14 @@ def stats(_: str = Depends(require_api_key)):
 
 
 @app.post("/v1/cache/clear", tags=["meta"])
-def clear_cache(_: str = Depends(require_api_key)):
+def clear_cache(
+    discovery: bool = Query(False, description="also drop the cached shard list"),
+    _: str = Depends(require_api_key),
+):
     db.cache_clear()
-    return {"cleared": True}
+    if discovery:
+        discover.clear_cache()
+    return {"cleared": True, "discovery": discovery}
 
 
 _FORBIDDEN = re.compile(
@@ -199,7 +237,11 @@ def _guard(fn):
         log.exception("query failed")
         raise HTTPException(502, f"data source error: {exc}") from exc
     except RuntimeError as exc:
-        raise HTTPException(503, str(exc)) from exc
+        # engine still warming up, or bootstrap failed — tell the client to
+        # come back rather than surfacing a stack trace
+        raise HTTPException(
+            503, str(exc), headers={"Retry-After": "10"}
+        ) from exc
 
 
 __all__ = ["app", "TelegramUser"]
