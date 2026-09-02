@@ -28,11 +28,15 @@ class SearchResponse(BaseModel):
 
 
 class Health(BaseModel):
-    status: str
+    status: str = Field(description="ok | starting | degraded")
+    engine: str = Field(description="cold | warming | ready | failed")
+    error: Optional[str] = None
+    warmup_seconds: float = 0.0
     duckdb: str
     source_mode: str
     source: str = ""
     files: int = 0
+    id_column: str = "user_id"
     cache: dict
 
 

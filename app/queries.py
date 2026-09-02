@@ -39,11 +39,19 @@ def _run(sql: str, params: List[Any], limit: int, offset: int) -> Dict[str, Any]
     }
 
 
+def _id_filter(user_id: int) -> Tuple[str, Any]:
+    """Filter on the *raw* id column so DuckDB can push the predicate into the
+    parquet scan and prune row groups by min/max statistics. Filtering on the
+    casted `user_id` alias would defeat that."""
+    predicate, cast = db.id_predicate()
+    return predicate, cast(user_id)
+
+
 def by_user_id(user_id: int) -> Dict[str, Any]:
-    """Fastest path: user_id is sorted in the parquet files, so DuckDB skips
-    almost every row group using min/max statistics."""
-    sql = f"SELECT {SELECT_COLS} FROM tg WHERE user_id = ? LIMIT 50"
-    return _run(sql, [user_id], 50, 0)
+    """Fastest path when the id column is sorted in the parquet files."""
+    predicate, value = _id_filter(user_id)
+    sql = f"SELECT {SELECT_COLS} FROM tg WHERE {predicate} LIMIT 50"
+    return _run(sql, [value], 50, 0)
 
 
 def by_phone(phone: str, fuzzy: bool, limit: int, offset: int) -> Dict[str, Any]:
@@ -91,8 +99,9 @@ def search(
     params: List[Any] = []
 
     if user_id is not None:
-        where.append("user_id = ?")
-        params.append(user_id)
+        predicate, value = _id_filter(user_id)
+        where.append(predicate)
+        params.append(value)
     if username:
         where.append("lower(username) LIKE ?")
         params.append(normalize_username(username) + "%")

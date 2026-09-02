@@ -27,7 +27,11 @@ def main() -> int:
         except Exception as exc:
             print("  (splits API unavailable:", exc, ")")
         shards = discover.parquet_urls(
-            s.dataset_repo, s.dataset_config, s.dataset_split, s.hf_token
+            s.dataset_repo,
+            s.dataset_config,
+            s.dataset_split,
+            s.hf_token,
+            s.dataset_revision,
         )
         print(f"  shards discovered: {len(shards)}")
         for u in shards[:5]:
@@ -42,8 +46,21 @@ def main() -> int:
         print("source:\n  " + "\n  ".join(s.urls))
 
     t0 = time.perf_counter()
+    try:
+        db.connection()
+    except Exception as exc:
+        print(f"\nBOOTSTRAP FAILED after {time.perf_counter() - t0:.1f}s:\n  {exc}")
+        return 1
+    print(f"\nbootstrap ok ({db.WARMUP_SECONDS:.1f}s) -> {db.RESOLVED_SOURCE}, "
+          f"{db.RESOLVED_FILES} files")
+
+    print("\nraw parquet schema:")
+    for c in db.RAW_SCHEMA:
+        print(f"  {c['name']:<16} {c['type']}")
+    print(f"  id column: {db.ID_COL} (text={db.ID_IS_TEXT})")
+
     cols = db.query("DESCRIBE SELECT * FROM tg")
-    print(f"\nschema ({time.perf_counter() - t0:.1f}s):")
+    print("\nAPI view `tg`:")
     for c in cols:
         print(f"  {c['column_name']:<16} {c['column_type']}")
 
@@ -57,9 +74,12 @@ def main() -> int:
     for row in sample:
         print(" ", row)
 
-    t0 = time.perf_counter()
-    total = db.scalar("SELECT count(*) FROM tg")
-    print(f"\nrow count: {total:,} ({time.perf_counter() - t0:.1f}s)")
+    if "--count" in sys.argv:
+        t0 = time.perf_counter()
+        total = db.scalar("SELECT count(*) FROM tg")
+        print(f"\nrow count: {total:,} ({time.perf_counter() - t0:.1f}s)")
+    else:
+        print("\n(pass --count for a full row count; it reads every footer)")
     return 0
 
 
